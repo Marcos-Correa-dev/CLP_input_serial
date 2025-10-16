@@ -17,7 +17,7 @@ modbus_data = {
 lock = threading.Lock()
 
 class ModbusWatcher(threading.Thread):
-    """Uma thread que atua como Mestre, monitorizando o CLP em segundo plano."""
+    """Thread Mestre, monitorizando o CLP em segundo plano e podendo escrever registros."""
 
     def __init__(self):
         super().__init__()
@@ -33,24 +33,37 @@ class ModbusWatcher(threading.Thread):
                     self.client.connect()
 
                 if self.client.is_socket_open():
-                    # Lê o estado do Coil que indica se a máquina está pronta
-                    coil_read = self.client.read_coils(
-                        address=config.COIL_MAQUINA_PRONTA,
-                        count=1,
+                    # --- LEITURA ---
+                    result = self.client.read_holding_registers(
+                        address=0,
+                        count=10,
                         unit=config.SLAVE_ID
                     )
 
-                    if not coil_read.isError():
-                        estado_pronta = coil_read.bits[0]
-                        print(f"[Modbus] Leitura bem-sucedida. Estado 'maquina_pronta': {estado_pronta}")
+                    if not result.isError():
+                        print(f"[Modbus] Leitura bem-sucedida. Valores: {result.registers}")
                         with lock:
-                            modbus_data["maquina_pronta"] = estado_pronta
                             modbus_data["connection_status"] = "Ligado"
+                            modbus_data["maquina_pronta"] = True
                     else:
-                        print(f"[Modbus] O CLP respondeu com um erro: {coil_read}")
+                        print(f"[Modbus] Erro na leitura: {result}")
                         raise ConnectionError("O CLP rejeitou o pedido de leitura.")
+
+                    # --- ESCRITA (somente 1 registrador como exemplo) ---
+                    write_result = self.client.write_register(
+                        address=0,   # registrador que deseja escrever
+                        value=44,   # valor a escrever
+                        unit=config.SLAVE_ID
+                    )
+
+                    if not write_result.isError():
+                        print("[Modbus] Valor escrito com sucesso no registrador 0!")
+                    else:
+                        print(f"[Modbus] Erro ao escrever no CLP: {write_result}")
+
                 else:
                     raise ConnectionError("Falha ao abrir o socket para o CLP.")
+
             except Exception as e:
                 print(f"[Modbus] Erro de comunicação: {e}")
                 with lock:
@@ -59,6 +72,7 @@ class ModbusWatcher(threading.Thread):
                 self.client.close()
 
             time.sleep(1)
+
 
 
 # --- FUNÇÃO DE AUTOMAÇÃO ---
