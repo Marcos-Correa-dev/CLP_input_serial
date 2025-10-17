@@ -49,7 +49,6 @@ class ModbusWatcher(threading.Thread):
                         print(f"[Modbus] Erro na leitura: {result}")
                         raise ConnectionError("O CLP rejeitou o pedido de leitura.")
 
-                    # --- ESCRITA (somente 1 registrador como exemplo) ---
                     write_result = self.client.write_register(
                         address=0,   # registrador que deseja escrever
                         value=44,   # valor a escrever
