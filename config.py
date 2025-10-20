@@ -1,23 +1,8 @@
-"""
-HOST_IP = "192.168.0.207"
-HOST_PORT = 8000
-
-HOST_MODBUS_IP = "192.168.0.180"
-MODBUS_PORT = 502
-SLAVE_ID = 1
-
-
-REG_LABELCODE_INICIO = 0
-
-MAX_CARACTERES_LABELCODE = 50
-
-COIL_NOVO_CODIGO_CHEGOU = 2
-"""
-
-
 HOST_IP = "0.0.0.0"  # Usar 0.0.0.0 é mais robusto que um IP específico
 PORTA = 8000
 ENDPOINT = "/trigger"
+
+LABELCODE_PORT = 8001  # porta para o serviço de input do labelcode
 
 PLC_IP = '192.168.0.180'  # Nome da variável corrigido
 PLC_PORT = 502
