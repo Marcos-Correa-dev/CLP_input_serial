@@ -151,7 +151,7 @@ class ModbusWatcher(threading.Thread):
         try:
             data_result = self.client.read_holding_registers(
                 address=100,
-                count=11,  # Lê 10 registradores para formar uma string
+                count=12,  # Lê 10 registradores para formar uma string
                 unit=config.SLAVE_ID
             )
 
@@ -201,17 +201,25 @@ class ModbusWatcher(threading.Thread):
                 byte_superior = reg & 0xFF
                 byte_inferior = (reg >> 8) & 0xFF
 
+                # Caso especial para valores pequenos (como 55 para '7' ASCII)
+                if reg < 256 and reg > 0:
+                    char = chr(reg).replace('\x00', '')
+                    if char:  # Adiciona apenas se não for vazio após replace
+                        chars.append(char)
+                    continue
 
-                # Adiciona somente bytes válidos (não nulos e não espaços)
+                # Processa os bytes individualmente antes de adicionar
                 if byte_inferior != 0:
-                    chars.append(chr(byte_superior))
-           ddd       if byte_superior != 0:
-                    chars.append(chr(byte_inferior))
+                    char_sup = chr(byte_superior).replace('\x00', '')
+                    if char_sup:  # Adiciona apenas se não for vazio após replace
+                        chars.append(char_sup)
 
-                    if reg == 50:  # ASCII "2"
-                        chars.append(chr(reg))
-                        continue
-            # Remove espaços em branco extras do final
+                if byte_superior != 0:
+                    char_inf = chr(byte_inferior).replace('\x00', '')
+                    if char_inf:  # Adiciona apenas se não for vazio após replace
+                        chars.append(char_inf)
+
+            # Remove espaços em branco extras no final
             resultado = ''.join(chars).rstrip()
 
             print(f"[Modbus] String decodificada corretamente do CLP: '{resultado}'")
@@ -266,8 +274,8 @@ class ModbusWatcher(threading.Thread):
 def digitar_labelcode(code: str):
     try:
         print(f"Ação: A digitar o LabelCode '{code}'...")
-        time.sleep(0.1)
-        pyautogui.write(code)
+        time.sleep(0.2)
+        pyautogui.write(code, interval=0.05)
         pyautogui.press('enter')
         print("Ação: Concluída com sucesso.")
         return True, "Digitado com sucesso."
