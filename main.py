@@ -205,7 +205,7 @@ class ModbusWatcher(threading.Thread):
                 # Adiciona somente bytes válidos (não nulos e não espaços)
                 if byte_inferior != 0:
                     chars.append(chr(byte_superior))
-           ddd      if byte_superior != 0:
+           ddd       if byte_superior != 0:
                     chars.append(chr(byte_inferior))
 
                     if reg == 50:  # ASCII "2"
