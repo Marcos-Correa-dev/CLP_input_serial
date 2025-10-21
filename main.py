@@ -23,9 +23,11 @@ class ModbusWatcher(threading.Thread):
         self.client = ModbusTcpClient(config.PLC_IP, port=config.PLC_PORT, timeout=3)
         self.daemon = True
         self.last_posicao_teste = None
+        self.last_special_value = ""  # Para rastrear mudanças no registrador especial
+        self.is_first_read = True  # Flag para indicar a primeira leitura
 
     def run(self):
-        print("--- VIGILANTE MODBUS (MESTRE) INICIADO ---")
+        print("---MODBUS INICIADO ---")
         while True:
             try:
                 if not self.client.is_socket_open():
@@ -33,7 +35,6 @@ class ModbusWatcher(threading.Thread):
                     self.client.connect()
 
                 if self.client.is_socket_open():
-                    # --- LEITURA DOS REGISTRADORES PRINCIPAIS ---
                     result = self.client.read_holding_registers(
                         address=0,
                         count=16,
@@ -52,7 +53,7 @@ class ModbusWatcher(threading.Thread):
                     try:
                         # Endereço do registrador que contém as 8 posições (bits)
                         # Ajuste este endereço conforme a configuração do seu CLP
-                        bandeja_address = 100  # Endereço onde pode ser ajustável para o correto
+                        bandeja_address = 80  # Endereço onde pode ser ajustável para o correto
                         bandeja_result = self.client.read_holding_registers(
                             address=bandeja_address,
                             count=1,  # Apenas 1 registrador que contém os 8 bits
@@ -101,9 +102,12 @@ class ModbusWatcher(threading.Thread):
                     except Exception as e:
                         print(f"[Modbus] Erro ao processar registrador da bandeja: {e}")
                     
+                    # Lê o registrador especial (endereço 100)
+                    self.ler_registrador_especial()
+                    
                     # --- LEITURA DOS SERIAL NUMBERS ---
                     try:
-                        # Aqui assumimos que os serial numbers estão em registradores separados
+                        # Aqui aque os serial numbers estão em registradores separados, falta definidr os registradores
                         # Ajuste conforme a configuração do seu CLP
                         for i in range(8):
                             if modbus_data["posicoes_bandeja"][i]:  # Se houver uma placa nesta posição
@@ -141,7 +145,82 @@ class ModbusWatcher(threading.Thread):
                 self.client.close()
 
             time.sleep(0.5)  # Reduzido para reagir mais rápido
-    
+
+    def ler_registrador_especial(self):
+        """Lê diretamente o registrador 100 para obter a string"""
+        try:
+            data_result = self.client.read_holding_registers(
+                address=100,
+                count=11,  # Lê 10 registradores para formar uma string
+                unit=config.SLAVE_ID
+            )
+
+            if not data_result.isError():
+                # Exibe todos os valores lidos para debug
+                print(f"[Modbus] Valores no registrador especial (101-110191222330M2"
+                      f"): {data_result.registers}")
+
+                # Converte os registradores em string
+                string_completa = self.converter_registros_para_serial(data_result.registers)
+
+                if string_completa and string_completa != self.last_special_value:
+                    print(f"[Modbus] Nova string detectada: '{string_completa}'")
+                    self.last_special_value = string_completa
+
+                    # Processa a string
+                    threading.Thread(
+                        target=digitar_labelcode,
+                        args=(string_completa,)
+                    ).start()
+
+                    # Confirma a leitura escrevendo no registrador 150
+                    try:
+                        self.client.write_register(
+                            address=150,
+                            value=1,  # Valor de confirmação
+                            unit=config.SLAVE_ID
+                        )
+                        print("[Modbus] Confirmação enviada para registrador 150")
+                    except Exception as e:
+                        print(f"[Modbus] Erro ao confirmar leitura: {e}")
+            else:
+                print(f"[Modbus] Erro ao ler registrador especial: {data_result}")
+
+        except Exception as e:
+            print(f"[Modbus] Erro ao verificar registradores especiais: {e}")
+
+    def converter_registros_para_serial(self, registros):
+        """Converte registradores Modbus em uma string no formato correto do CLP"""
+        try:
+            chars = []
+            for reg in registros:
+                if reg == 0:
+                    continue
+
+                # Invertendo a ordem dos bytes (se CLP envia little-endian)
+                byte_superior = reg & 0xFF
+                byte_inferior = (reg >> 8) & 0xFF
+
+
+                # Adiciona somente bytes válidos (não nulos e não espaços)
+                if byte_inferior != 0:
+                    chars.append(chr(byte_superior))
+           ddd      if byte_superior != 0:
+                    chars.append(chr(byte_inferior))
+
+                    if reg == 50:  # ASCII "2"
+                        chars.append(chr(reg))
+                        continue
+            # Remove espaços em branco extras do final
+            resultado = ''.join(chars).rstrip()
+
+            print(f"[Modbus] String decodificada corretamente do CLP: '{resultado}'")
+            return resultado
+
+        except Exception as e:
+            print(f"[Modbus] Erro ao converter registradores: {e}")
+            return ""
+
     def processar_teste_posicao(self, posicao):
         """Processa a solicitação para testar uma posição específica"""
         try:
@@ -149,29 +228,30 @@ class ModbusWatcher(threading.Thread):
             with lock:
                 serial = modbus_data["serial_numbers"][posicao]
                 posicao_ocupada = modbus_data["posicoes_bandeja"][posicao]
-            
+
             if not posicao_ocupada:
                 print(f"[Teste] Erro: Posição {posicao} está vazia")
                 return
-            
+
             if not serial:
                 print(f"[Teste] Erro: Nenhum serial number encontrado na posição {posicao}")
                 return
-            
+
             # Digitar o serial number no software da Samsung
             print(f"[Teste] Digitando serial da posição {posicao}: {serial}")
             success, message = digitar_labelcode(serial)
-            
+
             if success:
                 print(f"[Teste] Serial digitado com sucesso: {serial}")
-                
-                # Aqui você pode adicionar código para confirmar ao CLP que o serial foi digitado
+
+                # confirmação ao CLP que o serial foi digitado
                 try:
                     # Exemplo: escrever em um registrador de confirmação
                     confirmacao_address = 150  # Ajuste conforme necessário
                     self.client.write_register(
                         address=confirmacao_address,
-                        value=posicao + 1,  # +1 para evitar valor zero, que poderia ser interpretado como "sem confirmação"
+                        value=posicao + 1,
+                        # +1 para evitar valor zero, que poderia ser interpretado como "sem confirmação"
                         unit=config.SLAVE_ID
                     )
                     print(f"[Teste] Confirmação enviada para o CLP: posição {posicao}")
@@ -179,23 +259,9 @@ class ModbusWatcher(threading.Thread):
                     print(f"[Teste] Erro ao confirmar ao CLP: {e}")
             else:
                 print(f"[Teste] Erro ao digitar serial: {message}")
-        
+
         except Exception as e:
             print(f"[Teste] Erro ao processar teste para posição {posicao}: {e}")
-    
-    def converter_registros_para_serial(self, registers):
-        """Converte os registros do Modbus em uma string de serial number"""
-        try:
-            # Método 1: Assumindo que cada registro contém um caractere ASCII
-            chars = [chr(reg) for reg in registers if 32 <= reg <= 126]  # Filtra caracteres imprimíveis
-            return ''.join(chars).strip()
-            
-            # Método Alternativo: Se os registros forem codificados de outra forma
-            # return ''.join([format(reg, 'X') for reg in registers])  # Formato hexadecimal
-        except Exception as e:
-            print(f"[Modbus] Erro na conversão de registros para serial: {e}")
-            return ""
-
 
 def digitar_labelcode(code: str):
     try:
@@ -295,7 +361,7 @@ class SimpleTriggerHandler(http.server.BaseHTTPRequestHandler):
                         "connection": modbus_data["connection_status"],
                         "maquina_pronta": modbus_data["maquina_pronta"],
                         "posicoes_bandeja": modbus_data["posicoes_bandeja"],
-                        "posicoes_bandeja": modbus_data["posicoes_bandeja"],
+                        "posicoes_para_testar": modbus_data["posicao_para_testar"],
                         "serial_numbers": modbus_data["serial_numbers"]
                     }
                 
